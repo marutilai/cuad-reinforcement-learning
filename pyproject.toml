@@ -1,0 +1,33 @@
+[tool.poetry]
+name = "cuad-qa"
+version = "0.1.0"
+description = "CUAD (Contract Understanding Atticus Dataset) Question Answering processing tools"
+authors = ["Maruti Agarwal <marutiagarwal@gmail.com>"]
+readme = "README.md"
+packages = [{include = "cuad_qa"}]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+tqdm = "^4.66.1"
+datasets = "^2.18.0"
+pydantic = "^2.6.1"
+python-dotenv = "^1.1.0"
+openai = "^1.76.2"
+
+[tool.poetry.group.dev.dependencies]
+black = "^24.2.0"
+isort = "^5.13.2"
+flake8 = "^7.0.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 88
+target-version = ['py312']
+include = '\.pyi?$'
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3 
