@@ -7,17 +7,30 @@ readme = "README.md"
 packages = [{include = "cuad_qa"}]
 
 [tool.poetry.dependencies]
-python = "^3.12"
+python = ">=3.12,<3.13"
 tqdm = "^4.66.1"
 datasets = "^2.18.0"
 pydantic = "^2.6.1"
 python-dotenv = "^1.1.0"
-openai = "^1.76.2"
+skypilot = {extras = ["runpod"], version = ">=0.8.1"}
+huggingface-hub = "^0.31.1"
+tenacity = "^9.1.2"
+langchain-core = "^0.3.59"
+transformers = "^4.51.3"
+polars = "^1.29.0"
+tabulate = "^0.9.0"
+litellm = "^1.68.1"
+diskcache = "^5.6.3"
+matplotlib = "^3.10.3"
+panza = "^0.1.0"
+openpipe = "^4.50.0"
+openpipe-art = "^0.3.5"
 
 [tool.poetry.group.dev.dependencies]
 black = "^24.2.0"
 isort = "^5.13.2"
 flake8 = "^7.0.0"
+pytest = ">=8.3.5"
 
 [build-system]
 requires = ["poetry-core"]

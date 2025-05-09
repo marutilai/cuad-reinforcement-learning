@@ -14,5 +14,3 @@ poetry run python cuad-qa/data/convert_cuad_dataset.py --data-file cuad-qa/raw_d
 # Process test set only (for quick testing)
 poetry run python cuad-qa/data/convert_cuad_dataset.py --data-file cuad-qa/raw_data/test.json --max-contracts 5
 ```
-
-## Project Structure 
