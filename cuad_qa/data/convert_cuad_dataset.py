@@ -191,14 +191,22 @@ def parse_contracts(
 
 
 def save_to_disk(contracts: List[Contract], input_file: str):
-    """Save the structured contracts to disk as JSON in the same directory as input file"""
-    input_dir = os.path.dirname(input_file)
-    original_filename = os.path.basename(input_file)
-    output_file = os.path.join(input_dir, f"processed_{original_filename}")
+    """Save the structured contracts to disk as JSON in the ./data subdirectory relative to project root."""
+    # Assuming this script is in cuad_qa/data/
+    # Output to cuad_qa/data/processed_CUADv1.json (or similar)
+    output_dir = os.path.dirname(
+        os.path.abspath(__file__)
+    )  # This script's directory (cuad_qa/data)
+    base_input_filename = os.path.basename(input_file)
+    # Construct output filename like processed_CUADv1.json in the same dir as this script
+    output_filename = f"processed_{base_input_filename}"  # Or a fixed name like "processed_cuad_contracts.json"
+    output_file = os.path.join(output_dir, output_filename)
+
     logging.info(f"Saving processed data to {output_file}...")
 
     with open(output_file, "w", encoding="utf-8") as f:
         json_data = [contract.model_dump(mode="json") for contract in contracts]
+        # The schema {"version": "cuad_v1.0", "data": json_data} is good if load_processed_data expects it
         json.dump({"version": "cuad_v1.0", "data": json_data}, f, indent=2)
 
     logging.info(f"Saved processed data to {output_file}")

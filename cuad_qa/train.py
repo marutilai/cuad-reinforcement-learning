@@ -87,24 +87,18 @@ async def run_training(model: art.TrainableModel):
     logging.info(f"Model {model.name} registered with LocalAPI.")
 
     # 3. Load Checkpoints from S3 (Optional)
-    s3_bucket = os.environ.get("BACKUP_BUCKET")
-    if s3_bucket:
-        logging.info(
-            f"Attempting to pull previous checkpoints from S3 bucket: `{s3_bucket}`"
-        )
-        try:
-            await api._experimental_pull_from_s3(  # <<< CORRECTED: use 'api' object
-                model,
-                s3_bucket=s3_bucket,
-                verbose=True,
-            )
-            logging.info(f"Successfully pulled checkpoints for {model.name}.")
-        except Exception as e:
-            logging.warning(
-                f"Could not pull checkpoints from S3. Starting fresh. Error: {e}"
-            )
-    else:
-        logging.warning("BACKUP_BUCKET not set. Skipping S3 checkpoint loading.")
+    # --- S3 PULL REMOVED ---
+    # s3_bucket = os.environ.get("BACKUP_BUCKET")
+    # if s3_bucket:
+    #     logging.info(f"Attempting to pull previous checkpoints from S3 bucket: `{s3_bucket}`")
+    #     try:
+    #         await api._experimental_pull_from_s3(model, s3_bucket=s3_bucket, verbose=True)
+    #         logging.info(f"Successfully pulled checkpoints for {model.name}.")
+    #     except Exception as e:
+    #         logging.warning(f"Could not pull checkpoints from S3. Starting fresh. Error: {e}")
+    # else:
+    #     logging.info("BACKUP_BUCKET not set. Skipping S3 checkpoint loading. Using local checkpoints if any.")
+    logging.info("Using local checkpoints if any exist, or starting fresh.")
 
     # 4. Load Training & Validation Data (Scenarios)
     # Note: Validation scenarios are loaded within benchmark_cuad_model now
@@ -153,22 +147,17 @@ async def run_training(model: art.TrainableModel):
                 split="test",  # Explicitly use test split for evaluation
             )
 
-            if s3_bucket:
-                logging.info(f"Pushing checkpoint and logs to S3 bucket: `{s3_bucket}`")
-                try:
-                    # Optional: Delete older checkpoints before pushing new ones
-                    # await model.delete_checkpoints(keep=2) # Keep last 2 checkpoints
-                    await (
-                        api._experimental_push_to_s3(  # <<< CORRECTED: use 'api' object
-                            model,
-                            s3_bucket=s3_bucket,
-                        )
-                    )
-                    logging.info("Successfully pushed to S3.")
-                except Exception as e:
-                    logging.warning(f"Could not push checkpoint to S3. Error: {e}")
-            else:
-                logging.info("Skipping S3 push (BACKUP_BUCKET not set).")
+            # --- S3 PUSH REMOVED ---
+            # if s3_bucket:
+            #     logging.info(f"Pushing checkpoint and logs to S3 bucket: `{s3_bucket}`")
+            #     try:
+            #         await api._experimental_push_to_s3(model, s3_bucket=s3_bucket)
+            #         logging.info("Successfully pushed to S3.")
+            #     except Exception as e:
+            #         logging.warning(f"Could not push checkpoint to S3. Error: {e}")
+            # else:
+            #     logging.info("Skipping S3 push (BACKUP_BUCKET not set). Model checkpoints saved locally.")
+            logging.info("Model checkpoints and trajectories saved locally.")
 
         # --- Gather Trajectories for Training Step ---
         logging.info(f"Gathering trajectories for {len(batch)} scenarios...")
@@ -213,26 +202,24 @@ async def run_training(model: art.TrainableModel):
         model, limit=model.config.training_config.val_set_size, split="test"
     )
 
-    if s3_bucket:
-        logging.info(f"Pushing final model checkpoint to S3 bucket: `{s3_bucket}`")
-        try:
-            await api._experimental_push_to_s3(  # <<< CORRECTED: use 'api' object
-                model,
-                s3_bucket=s3_bucket,
-            )
-            logging.info("Successfully pushed final model to S3.")
-        except Exception as e:
-            logging.warning(f"Could not push final model checkpoint to S3. Error: {e}")
-    else:
-        logging.info("Skipping final S3 push (BACKUP_BUCKET not set).")
-
-    logging.info(f"Training for model {model.name} finished.")
+    # --- S3 PUSH REMOVED ---
+    # if s3_bucket:
+    #     logging.info(f"Pushing final model checkpoint to S3 bucket: `{s3_bucket}`")
+    #     try:
+    #         await api._experimental_push_to_s3(model, s3_bucket=s3_bucket)
+    #         logging.info("Successfully pushed final model to S3.")
+    #     except Exception as e:
+    #         logging.warning(f"Could not push final model checkpoint to S3. Error: {e}")
+    # else:
+    #     logging.info("Skipping final S3 push (BACKUP_BUCKET not set). Final model checkpoint saved locally.")
+    logging.info("Final model checkpoint and trajectories saved locally.")
 
 
 # --- Script Entry Point ---
 if __name__ == "__main__":
-    if not os.environ.get("BACKUP_BUCKET"):
-        logging.warning("BACKUP_BUCKET env var not set. S3 saving/loading disabled.")
+    # No need to check for BACKUP_BUCKET if not using S3
+    # if not os.environ.get("BACKUP_BUCKET"):
+    #      logging.warning("BACKUP_BUCKET env var not set. S3 saving/loading disabled.")
 
     config_to_run = cuad_agent_001
     logging.info(f"Selected configuration to run: {config_to_run.name}")

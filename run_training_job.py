@@ -7,6 +7,9 @@ from typing import Dict
 
 import sky  # Ensure skypilot is installed: pip install skypilot
 
+print(f"SkyPilot Version: {sky.__version__}")
+print(f"SkyPilot Path: {sky.__file__}")
+
 # Usage Example (from project root):
 # uv run run_training_job.py 001 --accelerator A10G:1 --env-file ./cuad_qa/.env --fast
 
@@ -91,67 +94,108 @@ def main():
     # --- Define Setup Script ---
     # Ensures uv, git, awscli are installed, clones ART if not mounted, installs project deps.
     setup_script = """
-        echo "Setting up environment..."
-        # Install uv if not present
-        command -v uv >/dev/null 2>&1 || (curl -LsSf https://astral.sh/uv/install.sh | sh && source $HOME/.bashrc)
+        echo "SKYPILOT SETUP SCRIPT STARTED"
+        set -e # Exit immediately if a command exits with a non-zero status.
 
-        # Check if ART repo is mounted/available, otherwise clone it
-        if [ ! -d "ART" ]; then
-            echo "Cloning ART repository..."
-            git clone https://github.com/OpenPipe/ART.git
-            cd ART # Change directory if cloning here
+        echo "INFO: Initial PATH: $PATH"
+        echo "INFO: Initial PWD: $(pwd)" # Will be ~/sky_workdir or similar
+        cd project_code # <<< NAVIGATE INTO YOUR MOUNTED PROJECT
+        echo "INFO: Changed PWD to: $(pwd)" # Will be ~/sky_workdir/project_code
+        echo "INFO: Initial python: $(which python || echo 'python not found')"
+        echo "INFO: Initial pip: $(which pip || echo 'pip not found')"
+
+        # Install Poetry
+        if ! command -v poetry &> /dev/null; then
+            echo "INFO: Poetry not found, installing..."
+            curl -sSL https://install.python-poetry.org | python3 -
+            # Attempt to add poetry to PATH immediately for this script session
+            # This is often $HOME/.local/bin or similar.
+            # The exact path can vary by Linux distribution / base image.
+            if [ -d "$HOME/.local/bin" ]; then
+                export PATH="$HOME/.local/bin:$PATH"
+            elif [ -d "$HOME/bin" ]; then # Another common location
+                export PATH="$HOME/bin:$PATH"
+            fi
+            # Also try to ensure it's in .bashrc for subsequent logins to the VM (if kept up)
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc # Or ~/.profile, ~/.zshrc
         else
-            echo "ART directory found."
+            echo "INFO: Poetry already installed."
+        fi
+        echo "INFO: Poetry version: $(poetry --version || echo 'poetry --version failed')"
+        echo "INFO: Path to poetry: $(which poetry || echo 'poetry not found in PATH after potential install')"
+
+
+        # Ensure we are in the project root (where pyproject.toml for cuad_qa is)
+        # SkyPilot's file_mounts {'/': '.'} copies the local project root to '/' on remote.
+        # So, pyproject.toml for cuad_qa is at /pyproject.toml on remote.
+        echo "INFO: Listing root directory: $(ls -la /)"
+        if [ ! -f "./pyproject.toml" ]; then
+            echo "ERROR: ./pyproject.toml not found! Check SkyPilot file_mounts and workdir."
+            exit 1
         fi
 
-        # Install/Update dependencies within the workdir (e.g., ART/ or ART/examples/cuad_qa/)
-        echo "Installing dependencies..."
-        # Install ART library itself editable
-        uv pip install --editable ./
-        # Install dependencies from the project's pyproject.toml if it exists
-        if [ -f "cuad_qa/pyproject.toml" ]; then
-             echo "Installing dependencies from cuad_qa/pyproject.toml..."
-             uv pip install -r cuad_qa/requirements.txt # Or sync pyproject.toml if you have one
-        elif [ -f "pyproject.toml" ]; then
-            # Fallback to root pyproject.toml if needed
-            uv sync --all-extras
-        else
-             echo "Warning: No pyproject.toml found for project dependencies."
-        fi
-        uv pip install awscli # Ensure awscli for S3 backups
+        echo "INFO: Installing project dependencies using Poetry from ./pyproject.toml..."
+        # Use -vvv for very verbose output if still having issues
+        poetry install --no-dev --all-extras --no-root
+        echo "INFO: Poetry install finished."
 
-        # Run data preparation steps (ensure DB and Scenarios are ready)
-        # These assume the necessary source files (CUADv1.json) are present or copied.
-        # We might need to copy them using sky file_mounts or download them here.
-        # For simplicity, assume they are copied via file_mounts for now.
-        echo "Preparing data..."
-        if [ -f "cuad_qa/raw_data/CUADv1.json" ]; then
-            # Generate processed JSON
-            python -m cuad_qa.data.convert_cuad_dataset --data-file cuad_qa/raw_data/CUADv1.json
-            # Generate SQLite DB (using the generated processed JSON)
-            python -m cuad_qa.data.local_contract_db --input-json cuad_qa/data/processed_CUADv1.json --overwrite
-            # Generate and push scenarios (requires HF token in env)
-            # Ensure HF_REPO_ID is set correctly for your user
-            # Consider making HF_REPO_ID an env var passed from .env
-            HF_REPO_ID="marutiagarwal/cuad-qa-scenarios" # Replace with your actual repo ID or load from ENV
-            python -m cuad_qa.data.generate_cuad_scenarios --hf-repo-id ${HF_REPO_ID}
-        else
-            echo "WARNING: Raw data file cuad_qa/raw_data/CUADv1.json not found. Skipping data preparation."
-            echo "Ensure data is prepared manually or mounted correctly."
-        fi
+        # Verify key package versions *within the Poetry environment*
+        echo "INFO: Verifying package versions with 'poetry run pip show':"
+        poetry run pip show numpy torch openpipe-art skypilot
+        # Specifically check NumPy version managed by Poetry
+        NUMPY_VERSION_POETRY=$(poetry run pip show numpy | grep Version | awk '{print $2}')
+        echo "INFO: NumPy version according to 'poetry run pip show': $NUMPY_VERSION_POETRY"
 
-        echo "Setup complete."
-        """
+        # Force uninstall any other numpy versions and reinstall the one Poetry wants
+        # This is an aggressive step to try and resolve conflicts.
+        echo "INFO: Attempting to ensure correct NumPy version..."
+        poetry run pip uninstall -y numpy # Uninstall numpy from poetry env (if any)
+        # poetry run pip uninstall -y $(pip list | grep -i numpy | awk '{print $1}') # Try to remove any system/other numpy
+        # sudo apt-get remove -y python3-numpy # If it's a system package (less likely on cloud VMs)
+        poetry run pip install "numpy~=1.26.4" # Force install your pinned version
+        echo "INFO: NumPy version after explicit reinstall: $(poetry run pip show numpy | grep Version)"
 
-    # --- Define Run Script ---
+
+        # Data Preparation (run within Poetry's environment)
+        echo "INFO: Preparing data..."
+        RAW_DATA_FILE="cuad_qa/raw_data/CUADv1.json" # Path is now relative to 'project_code'
+        PROCESSED_JSON_FILE="cuad_qa/data/processed_CUADv1.json"
+        DB_FILE="cuad_qa/data/cuad_contracts.db"
+
+        if [ -f "$RAW_DATA_FILE" ]; then
+            echo "INFO: Found raw data file: $RAW_DATA_FILE"
+            poetry run python -m cuad_qa.data.convert_cuad_dataset --data-file "$RAW_DATA_FILE"
+            if [ -f "$PROCESSED_JSON_FILE" ]; then
+                poetry run python -m cuad_qa.data.local_contract_db --input-json "$PROCESSED_JSON_FILE" --overwrite
+                if [ -f "$DB_FILE" ]; then
+                    HF_REPO_ID_VAR="${HF_REPO_ID:-marutiagarwal/cuad-qa-scenarios}"
+                    poetry run python -m cuad_qa.data.generate_cuad_scenarios --hf-repo-id "${HF_REPO_ID_VAR}"
+                else echo "WARNING: DB file $DB_FILE not found. Skipping scenario generation."; fi
+            else echo "WARNING: Processed JSON $PROCESSED_JSON_FILE not found. Skipping DB/scenario gen."; fi
+        else echo "WARNING: Raw data file $RAW_DATA_FILE not found. Skipping data prep."; fi
+
+        echo "SKYPILOT SETUP SCRIPT FINISHED"
+    """
+
+    # Ensure your run_script uses poetry run:
     run_script = f"""
-        echo "Starting training run {formatted_run_id}..."
-        # Set RUN_ID env var if train.py uses it (optional)
+        echo "SKYPILOT RUN SCRIPT STARTED"
+        set -e
+        export PATH="$HOME/.local/bin:$PATH" # Ensure poetry is in PATH for run script too
+
+        cd project_code # <<< NAVIGATE INTO YOUR MOUNTED PROJECT
+
+        # Verify environment for the run script
+        echo "INFO (run_script): Current directory: $(pwd)"
+        echo "INFO (run_script): Python being used: $(poetry run which python)"
+        echo "INFO (run_script): NumPy version: $(poetry run pip show numpy | grep Version)"
+
+        echo "INFO (run_script): Starting training run {formatted_run_id}..."
         export RUN_ID="{formatted_run_id}"
-        # Execute the training script using python -m for proper module resolution
-        python -m cuad_qa.train
-        echo "Training run {formatted_run_id} finished."
-        """
+        poetry run python -m cuad_qa.train # Key command
+        echo "INFO (run_script): Training run {formatted_run_id} finished."
+        echo "SKYPILOT RUN SCRIPT FINISHED"
+    """
 
     # --- Define Base Environment Variables ---
     # These will be merged with/overridden by variables from the .env file
@@ -159,14 +203,16 @@ def main():
         "HF_HUB_ENABLE_HF_TRANSFER": "1",  # Faster HF downloads/uploads
         "WANDB_API_KEY": "",  # Optional: For Weights & Biases logging
         "OPENAI_API_KEY": "",  # Needed for the judge LLM
-        "GOOGLE_API_KEY": "",  # Needed if using Gemini judge
+        # "GOOGLE_API_KEY": "",  # Needed if using Gemini judge
         "OPENPIPE_API_KEY": "",  # Optional: For OpenPipe logging
         "RUN_ID": formatted_run_id,  # Pass run_id if needed by train.py
-        "AWS_ACCESS_KEY_ID": "",  # For S3 backup
-        "AWS_SECRET_ACCESS_KEY": "",  # For S3 backup
-        "AWS_REGION": "",  # Optional: Specify S3 region
-        "BACKUP_BUCKET": "",  # Required if using S3 backup
-        "HF_TOKEN": "",  # Optional: Needed if pushing private HF datasets/models
+        # "AWS_ACCESS_KEY_ID": "",  # For S3 backup
+        # "AWS_SECRET_ACCESS_KEY": "",  # For S3 backup
+        # "AWS_REGION": "",  # Optional: Specify S3 region
+        # "BACKUP_BUCKET": "",  # Required if using S3 backup
+        "HUGGINGFACE_HUB_TOKEN": "",  # Optional: Needed if pushing private HF datasets/models
+        "HF_REPO_ID": "marutiagarwal/cuad-qa-scenarios",  # Make HF_REPO_ID configurable via .env for the setup script
+        "NP_BOOLEAN_WARNING_AND_FUTURE_ERROR_ALLOWED": "1",  # Important for some libraries like transformers/hf with numpy 2.0 issues
         # Add any other ENV VARS your scripts might need
     }
 
@@ -176,24 +222,61 @@ def main():
         # Workdir should be the root where cuad_qa dir exists
         # If running from ART root, workdir='.' might be correct.
         # If running from examples/, workdir='../..' might be needed. Adjust as necessary.
-        workdir=".",  # <<< ADJUST if needed based on where you run `uv run run_training_job.py`
+        # workdir="/",  # Run commands from the root of the mounted project
         setup=setup_script,
         run=run_script,
         envs=base_envs,  # Base envs; loaded .env file will update these
     )
 
     # --- Configure Resources ---
+    def _parse_accelerator(spec: str) -> Dict[str, int]:
+        """Parse an accelerator spec of the form 'TYPE:COUNT' (COUNT optional)."""
+        if ":" in spec:
+            name, count_str = spec.split(":", 1)
+            try:
+                count = int(count_str)
+                if count <= 0:
+                    raise ValueError("Count must be positive.")
+            except ValueError as exc:
+                raise ValueError(
+                    f"Invalid accelerator count in spec '{spec}'. Must be a positive int."
+                ) from exc
+        else:
+            name, count = spec, 1  # Default to 1 if no count specified
+        return {name: count}
+
     try:
-        acc_dict = sky.accelerators.get_accelerator_from_dot_string(args.accelerator)
+        acc_dict = _parse_accelerator(args.accelerator)
         if acc_dict is None:
             raise ValueError(f"Invalid accelerator string: {args.accelerator}")
     except Exception as e:
         print(f"Error parsing accelerator: {e}", file=sys.stderr)
         sys.exit(1)
 
+    # --- Select Cloud Object ---
+    cloud_instance = None
+    if args.cloud.lower() == "aws":
+        cloud_instance = sky.clouds.AWS()
+    elif args.cloud.lower() == "gcp":
+        cloud_instance = sky.clouds.GCP()
+    elif args.cloud.lower() == "azure":
+        cloud_instance = sky.clouds.Azure()
+    elif args.cloud.lower() == "runpod":
+        cloud_instance = sky.clouds.RunPod()
+    elif args.cloud.lower() == "lambda":
+        cloud_instance = sky.clouds.Lambda()
+    # Add other clouds as needed from sky.clouds module
+    else:
+        print(
+            f"Error: Unsupported or unknown cloud provider specified: {args.cloud}",
+            file=sys.stderr,
+        )
+        print(f"Supported examples: aws, gcp, azure, runpod, lambda", file=sys.stderr)
+        sys.exit(1)
+
     task.set_resources(
         sky.Resources(
-            cloud=sky.clouds.CLOUD_REGISTRY.from_str(args.cloud),  # Use selected cloud
+            cloud=cloud_instance,  # Use selected cloud
             accelerators=acc_dict,
             # Optionally add memory/cpu requests if needed
             # memory="64G+",
@@ -208,7 +291,7 @@ def main():
         {
             # Mount your project code to the root of the workdir on the remote machine
             # Adjust '/cuad_qa' path if your local structure differs
-            "/cuad_qa": "./cuad_qa",
+            "project_code": "."
             # Mount raw data if needed by setup script (ensure path exists locally)
             # '/cuad_qa/raw_data': './cuad_qa/raw_data', # Mount the raw data dir
         }
@@ -222,6 +305,10 @@ def main():
     task.update_envs(loaded_envs)
     # Ensure RUN_ID is correctly set (might be overridden by .env file, depends on desired priority)
     task.update_envs({"RUN_ID": formatted_run_id})
+
+    # Ensure HF_REPO_ID from .env is passed if set, otherwise use default from base_envs
+    if "HF_REPO_ID" in loaded_envs:
+        task.update_envs({"HF_REPO_ID": loaded_envs["HF_REPO_ID"]})
 
     print(f"Final task environment variables (excluding potentially sensitive):")
     for k, v in task.envs.items():
@@ -256,18 +343,21 @@ def main():
 
     try:
         # Launch the job. `down=True` ensures cluster terminates after job or idle timeout.
-        sky.launch(
+        request_id = sky.launch(
             task,
             cluster_name=cluster_name,
             retry_until_up=True,  # Wait for cluster to be ready
             idle_minutes_to_autostop=args.idle_minutes,
             down=True,  # Terminate cluster when job finishes or idles
-            stream_logs=True,  # Stream logs to console
             fast=args.fast,  # Reuse cluster if possible/requested
         )
+        print(f"SkyPilot launch request submitted. Request ID: {request_id}")
+
         # Note: sky.launch with stream_logs=True blocks until completion.
         # If you need the request_id for detached execution, set stream_logs=False
         # and use sky.queue(request_id) / sky.logs(request_id) / sky.cancel(request_id) later.
+        print(f"Streaming logs for request ID: {request_id}...")
+        sky.stream_logs(request_id=request_id, follow=True)
 
         print(
             f"\nJob '{formatted_run_id}' on cluster '{cluster_name}' completed successfully."

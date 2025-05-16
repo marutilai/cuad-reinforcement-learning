@@ -6,12 +6,27 @@ from typing import List, Optional
 from datasets import load_dataset, Dataset
 from .generate_cuad_scenarios import ClauseFindingScenario
 
+import numpy as np
+
 # Define the Hugging Face repository ID for CUAD scenarios
 HF_REPO_ID = "marutiagarwal/cuad-qa-scenarios"
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
+
+
+def convert_ndarray_to_list(d):
+    # Recursively convert all numpy arrays to lists/ints/floats
+    if isinstance(d, dict):
+        return {k: convert_ndarray_to_list(v) for k, v in d.items()}
+    elif isinstance(d, np.ndarray):
+        # Flatten to scalar if array is scalar
+        if d.shape == ():
+            return d.item()
+        return d.tolist()
+    else:
+        return d
 
 
 def load_clause_finding_scenarios(
@@ -54,6 +69,7 @@ def load_clause_finding_scenarios(
     skipped_count = 0
     for row in dataset:
         try:
+            row = convert_ndarray_to_list(row)
             scenarios.append(ClauseFindingScenario(**row))
         except Exception as e:
             logging.warning(f"Skipping row due to conversion error: {e}. Row: {row}")

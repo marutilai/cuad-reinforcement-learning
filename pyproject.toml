@@ -12,7 +12,7 @@ tqdm = "^4.66.1"
 datasets = "^2.18.0"
 pydantic = "^2.6.1"
 python-dotenv = "^1.1.0"
-skypilot = {extras = ["runpod"], version = ">=0.8.1"}
+skypilot = {extras = ["runpod"], version = "*"}
 huggingface-hub = "^0.31.1"
 tenacity = "^9.1.2"
 langchain-core = "^0.3.59"
